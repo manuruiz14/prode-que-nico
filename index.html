@@ -370,15 +370,24 @@ function doLogin() {
     var pw = prompt('Contrasena de admin:');
     if (pw !== APASS) { toast('Contrasena incorrecta', '#e85555'); return; }
     CU = 'admin'; ADM = true;
-    enterApp();
+    loadAll().then(function() { enterApp(); });
     return;
   }
+  var btn = document.getElementById('btn-login');
+  btn.textContent = 'Cargando...';
+  btn.style.opacity = '0.7';
   CU = name; ADM = false;
-  // Registrar usuario en Supabase si no existe
   sbUpsert('users', { name: name }).then(function() {
     return loadAll();
   }).then(function() {
+    btn.textContent = 'ENTRAR AL PRODE';
+    btn.style.opacity = '1';
     enterApp();
+  }).catch(function(e) {
+    btn.textContent = 'ENTRAR AL PRODE';
+    btn.style.opacity = '1';
+    toast('Error de conexion, intenta de nuevo', '#e85555');
+    CU = null;
   });
 }
 
