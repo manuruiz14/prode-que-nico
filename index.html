@@ -211,7 +211,7 @@ var BIN_KEY = '$2a$10$XMM2AfUMF0KgEhQL3B.JC.jzyMC09BwdZAQ97VA43mhM4PzCx9/Q6';
 var BIN_URL = 'https://api.jsonbin.io/v3/b/' + BIN_ID;
 
 // Estado en memoria
-var DB = { users: [], predictions: {}, results: {}, koNames: {} };
+var DB = { users: [], passwords: {}, predictions: {}, results: {}, koNames: {} };
 var CU = null, ADM = false;
 var gff = 'all', kof = '16avos', at = 'usuarios';
 var APASS = 'nico2026';
@@ -223,6 +223,7 @@ function loadDB() {
     .then(function(data) {
       DB = data.record || { users: [], predictions: {}, results: {}, koNames: {} };
       if (!DB.users) DB.users = [];
+      if (!DB.passwords) DB.passwords = {};
       if (!DB.predictions) DB.predictions = {};
       if (!DB.results) DB.results = {};
       if (!DB.koNames) DB.koNames = {};
@@ -364,11 +365,29 @@ function doLogin() {
   }
   setBtnLoading(true);
   loadDB().then(function() {
+    // Usuario nuevo
+    if (DB.users.indexOf(name) === -1) {
+      setBtnLoading(false);
+      var pw1 = prompt('Usuario nuevo. Elegí una contraseña:');
+      if (!pw1 || pw1.trim() === '') { toast('Debes elegir una contraseña', '#e85555'); return; }
+      var pw2 = prompt('Repetí la contraseña:');
+      if (pw1 !== pw2) { toast('Las contraseñas no coinciden', '#e85555'); return; }
+      DB.users.push(name);
+      DB.passwords[name] = pw1;
+      if (!DB.predictions[name]) DB.predictions[name] = {};
+      CU = name; ADM = false;
+      setBtnLoading(true);
+      return saveDB();
+    }
+    // Usuario existente
+    setBtnLoading(false);
+    var pw = prompt('Contraseña de ' + name + ':');
+    if (pw === null) return;
+    if (pw !== DB.passwords[name]) { toast('Contraseña incorrecta', '#e85555'); return; }
     CU = name; ADM = false;
-    if (DB.users.indexOf(name) === -1) DB.users.push(name);
     if (!DB.predictions[name]) DB.predictions[name] = {};
-    return saveDB();
   }).then(function() {
+    if (!CU) return;
     setBtnLoading(false);
     enterApp();
   }).catch(function() {
@@ -383,17 +402,29 @@ function loginAs(name) {
     var pw = prompt('Contrasena de admin:');
     if (pw !== APASS) { toast('Contrasena incorrecta', '#e85555'); return; }
     CU = 'admin'; ADM = true;
+    setBtnLoading(true);
+    loadDB().then(function() {
+      setBtnLoading(false);
+      enterApp();
+    }).catch(function() {
+      setBtnLoading(false);
+      toast('Error de conexion', '#e85555');
+    });
   } else {
-    CU = name; ADM = false;
+    setBtnLoading(true);
+    loadDB().then(function() {
+      setBtnLoading(false);
+      var pw = prompt('Contrasena de ' + name + ':');
+      if (pw === null) return;
+      if (pw !== DB.passwords[name]) { toast('Contrasena incorrecta', '#e85555'); return; }
+      CU = name; ADM = false;
+      if (!DB.predictions[name]) DB.predictions[name] = {};
+      enterApp();
+    }).catch(function() {
+      setBtnLoading(false);
+      toast('Error de conexion', '#e85555');
+    });
   }
-  setBtnLoading(true);
-  loadDB().then(function() {
-    setBtnLoading(false);
-    enterApp();
-  }).catch(function() {
-    setBtnLoading(false);
-    toast('Error de conexion', '#e85555');
-  });
 }
 
 function logout() {
@@ -669,6 +700,14 @@ function deleteUser(btn) {
   });
 }
 
+function resetPass(btn) {
+  var name = btn.getAttribute('data-name');
+  var pw1 = prompt('Nueva contrasena para ' + name + ':');
+  if (!pw1 || pw1.trim() === '') { toast('Contrasena vacia', '#e85555'); return; }
+  DB.passwords[name] = pw1;
+  saveDB().then(function() { toast('Contrasena de ' + name + ' actualizada'); });
+}
+
 function renderUsuarios() {
   if (!DB.users || !DB.users.length) {
     return '<div class="es"><h3>No hay usuarios registrados</h3></div>';
@@ -686,7 +725,10 @@ function renderUsuarios() {
       '<div><div style="font-size:14px;font-weight:500">' + u + '</div>' +
       '<div style="font-size:12px;color:var(--muted)">' + sent + '/' + TOTAL + ' pronosticos enviados</div></div>' +
       '</div>' +
+      '<div style="display:flex;gap:6px">' +
+      '<button onclick="resetPass(this)" data-name="' + u + '" style="background:var(--blue);color:#fff;border:none;padding:7px 14px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--fb)">Reset pass</button>' +
       '<button onclick="deleteUser(this)" data-name="' + u + '" style="background:var(--red);color:#fff;border:none;padding:7px 14px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--fb)">Eliminar</button>' +
+      '</div>' +
       '</div>';
   }
   html += '</div>';
