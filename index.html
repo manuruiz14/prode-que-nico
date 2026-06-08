@@ -48,6 +48,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--fb);min-height:100
 .mc.locked{border-color:rgba(74,158,255,.8);background:rgba(74,158,255,.04)}
 .mc.ok{border-color:var(--green);background:rgba(61,186,110,.04)}
 .mc.bad{border-color:rgba(232,85,85,.3)}
+.mc.partial{border-color:var(--amber);background:rgba(232,169,74,.04)}
 .mh{font-size:11px;color:var(--muted);margin-bottom:7px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
 .mb{display:flex;align-items:center;gap:6px}
 .tl{font-size:13px;font-weight:500;flex:1}
@@ -70,6 +71,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--fb);min-height:100
 .kc.locked{border-color:rgba(74,158,255,.8);background:rgba(74,158,255,.04)}
 .kc.ok{border-color:var(--green);background:rgba(61,186,110,.04)}
 .kc.bad{border-color:rgba(232,85,85,.3)}
+.kc.partial{border-color:var(--amber);background:rgba(232,169,74,.04)}
 .kh{font-size:11px;color:var(--muted);margin-bottom:6px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
 .kb{display:flex;align-items:center;gap:5px}
 .kt{flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:6px 8px;font-size:12px;font-weight:500;min-height:32px;display:flex;align-items:center}
@@ -186,9 +188,10 @@ body{background:var(--bg);color:var(--text);font-family:var(--fb);min-height:100
 </div>
 
 <div class="pg" id="pg-admin">
-  <div class="adm-banner">Panel Admin - Carga resultados reales y edita nombres de equipos en eliminatorias</div>
+  <div class="adm-banner">Panel Admin - Carga resultados reales, edita equipos en eliminatorias y gestioná usuarios</div>
   <div class="tg">
-    <button class="tb on" onclick="setAT('grupo',this)">Fase de Grupos</button>
+    <button class="tb on" onclick="setAT('usuarios',this)">Usuarios</button>
+    <button class="tb" onclick="setAT('grupo',this)">Fase de Grupos</button>
     <button class="tb" onclick="setAT('16avos',this)">16avos</button>
     <button class="tb" onclick="setAT('octavos',this)">Octavos</button>
     <button class="tb" onclick="setAT('cuartos',this)">Cuartos</button>
@@ -210,7 +213,7 @@ var BIN_URL = 'https://api.jsonbin.io/v3/b/' + BIN_ID;
 // Estado en memoria
 var DB = { users: [], predictions: {}, results: {}, koNames: {} };
 var CU = null, ADM = false;
-var gff = 'all', kof = '16avos', at = 'grupo';
+var gff = 'all', kof = '16avos', at = 'usuarios';
 var APASS = 'nico2026';
 
 function loadDB() {
@@ -310,10 +313,19 @@ function gp(u, id) {
 }
 function gr(id) { return DB.results[id] || { h: null, a: null }; }
 function hasR(id) { var r = gr(id); return r.h !== null && r.a !== null; }
-function isOk(u, id) {
+function getPts(u, id) {
   var p = gp(u, id), r = gr(id);
-  return p.h !== null && p.a !== null && r.h !== null && r.a !== null && p.h === r.h && p.a === r.a;
+  if (p.h === null || p.a === null || r.h === null || r.a === null) return 0;
+  // 3 puntos: resultado exacto
+  if (p.h === r.h && p.a === r.a) return 3;
+  // 1 punto: acerto ganador o empate
+  var predRes = p.h > p.a ? 1 : p.h < p.a ? -1 : 0;
+  var realRes = r.h > r.a ? 1 : r.h < r.a ? -1 : 0;
+  if (predRes === realRes) return 1;
+  return 0;
 }
+function isOk(u, id) { return getPts(u, id) === 3; }
+function isPartialOk(u, id) { return getPts(u, id) === 1; }
 function isLocked(u, id) { return !!(gp(u, id).locked); }
 function getKOName(id, side) { return DB.koNames[id + '_' + side] || null; }
 
@@ -536,13 +548,19 @@ function gmCard(m, u, adm) {
   var hr = hasR(m.id), ok = !adm && isOk(u, m.id), lk = !adm && isLocked(u, m.id);
   var cls = 'mc';
   if (!adm) {
-    if (hr && pred) cls += ok ? ' ok' : ' bad';
-    else if (lk) cls += ' locked';
+    if (hr && pred) {
+      var _pts = getPts(u, m.id);
+      cls += _pts === 3 ? ' ok' : _pts === 1 ? ' partial' : ' bad';
+    } else if (lk) cls += ' locked';
     else if (pred) cls += ' pred';
   }
   var badge = '';
-  if (!adm && hr && pred) badge = ok ? '<span class="badge bg">Acertaste</span>' : '<span class="badge br">Fallaste</span>';
-  else if (!adm && lk && !hr) badge = '<span class="badge bl">Enviado</span>';
+  var pts = !adm && hr && pred ? getPts(u, m.id) : -1;
+  if (!adm && hr && pred) {
+    if (pts === 3) badge = '<span class="badge bg">+3 Exacto</span>';
+    else if (pts === 1) badge = '<span class="badge ba">+1 Ganador</span>';
+    else badge = '<span class="badge br">0 pts</span>';
+  } else if (!adm && lk && !hr) badge = '<span class="badge bl">Enviado</span>';
   else if (!adm && pred && !lk) {
     if (p.h > p.a) badge = '<span class="badge bb">' + m.h + ' gana</span>';
     else if (p.h < p.a) badge = '<span class="badge bb">' + m.a + ' gana</span>';
@@ -577,13 +595,19 @@ function koCard(m, u, adm) {
   var nameA = getKOName(m.id, 'a') || m.ad;
   var cls = 'kc';
   if (!adm) {
-    if (hr && pred) cls += ok ? ' ok' : ' bad';
-    else if (lk) cls += ' locked';
+    if (hr && pred) {
+      var _pts2 = getPts(u, m.id);
+      cls += _pts2 === 3 ? ' ok' : _pts2 === 1 ? ' partial' : ' bad';
+    } else if (lk) cls += ' locked';
     else if (pred) cls += ' pred';
   }
   var badge = '';
-  if (!adm && hr && pred) badge = ok ? '<span class="badge bg">Acertaste</span>' : '<span class="badge br">Fallaste</span>';
-  else if (!adm && lk && !hr) badge = '<span class="badge bl">Enviado</span>';
+  var pts2 = !adm && hr && pred ? getPts(u, m.id) : -1;
+  if (!adm && hr && pred) {
+    if (pts2 === 3) badge = '<span class="badge bg">+3 Exacto</span>';
+    else if (pts2 === 1) badge = '<span class="badge ba">+1 Ganador</span>';
+    else badge = '<span class="badge br">0 pts</span>';
+  } else if (!adm && lk && !hr) badge = '<span class="badge bl">Enviado</span>';
   var vh = p.h !== null ? p.h : '', va = p.a !== null ? p.a : '';
   var rh = r.h !== null ? r.h : '', ra = r.a !== null ? r.a : '';
   if (adm) {
@@ -631,11 +655,52 @@ function renderKO() {
   document.getElementById('ct-ko').innerHTML = html;
 }
 
+
+// ---- ELIMINAR USUARIO ----
+function deleteUser(btn) {
+  var name = btn.getAttribute('data-name');
+  if (!confirm('Eliminar a ' + name + ' y todos sus pronosticos?')) return;
+  var idx = DB.users.indexOf(name);
+  if (idx > -1) DB.users.splice(idx, 1);
+  delete DB.predictions[name];
+  saveDB().then(function() {
+    toast('Usuario ' + name + ' eliminado');
+    renderAdmin();
+  });
+}
+
+function renderUsuarios() {
+  if (!DB.users || !DB.users.length) {
+    return '<div class="es"><h3>No hay usuarios registrados</h3></div>';
+  }
+  var html = '<div style="margin-bottom:18px"><div class="stitle">Usuarios registrados</div>';
+  for (var i = 0; i < DB.users.length; i++) {
+    var u = DB.users[i];
+    var sent = 0;
+    for (var j = 0; j < ALL.length; j++) {
+      if (isLocked(u, ALL[j].id)) sent++;
+    }
+    html += '<div class="lr" style="justify-content:space-between">' +
+      '<div style="display:flex;align-items:center;gap:12px">' +
+      '<div class="av" style="background:var(--accent);color:#0a0e1a">' + u[0].toUpperCase() + '</div>' +
+      '<div><div style="font-size:14px;font-weight:500">' + u + '</div>' +
+      '<div style="font-size:12px;color:var(--muted)">' + sent + '/' + TOTAL + ' pronosticos enviados</div></div>' +
+      '</div>' +
+      '<button onclick="deleteUser(this)" data-name="' + u + '" style="background:var(--red);color:#fff;border:none;padding:7px 14px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--fb)">Eliminar</button>' +
+      '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
 function renderAdmin() {
   if (!ADM) { document.getElementById('ct-adm').innerHTML = '<div class="es"><h3>Acceso denegado</h3></div>'; return; }
   var N = { '16avos': '16avos de Final', octavos: 'Octavos de Final', cuartos: 'Cuartos de Final', semis: 'Semifinales', final: 'Final' };
   var html = '';
-  if (at === 'grupo') {
+  if (at === 'usuarios') {
+    document.getElementById('ct-adm').innerHTML = renderUsuarios();
+    return;
+  } else if (at === 'grupo') {
     var keys = Object.keys(GRP);
     for (var gi = 0; gi < keys.length; gi++) {
       var g = keys[gi];
@@ -662,11 +727,15 @@ function renderTabla() {
   var rows = [];
   for (var i = 0; i < DB.users.length; i++) {
     var u = DB.users[i], pts = 0, sent = 0, cor = 0;
+    var exact = 0, partial = 0;
     for (var j = 0; j < ALL.length; j++) {
       if (isLocked(u, ALL[j].id)) sent++;
-      if (isOk(u, ALL[j].id)) { pts++; cor++; }
+      var mp = getPts(u, ALL[j].id);
+      pts += mp;
+      if (mp === 3) exact++;
+      else if (mp === 1) partial++;
     }
-    rows.push({ u: u, pts: pts, sent: sent, cor: cor });
+    rows.push({ u: u, pts: pts, sent: sent, exact: exact, partial: partial });
   }
   rows.sort(function(a, b) { return b.pts - a.pts || b.cor - a.cor || b.sent - a.sent; });
   var html = '';
@@ -676,7 +745,7 @@ function renderTabla() {
     var youBadge = (r.u === CU && !ADM) ? ' <span style="font-size:11px;color:var(--accent)">(vos)</span>' : '';
     html += '<div class="lr"><span class="lrk ' + k + '">' + (i+1) + '</span>' +
       '<div style="flex:1"><div style="font-size:14px;font-weight:500;margin-bottom:2px">' + r.u + youBadge + '</div>' +
-      '<div style="font-size:12px;color:var(--muted)">' + r.sent + '/' + TOTAL + ' enviados &middot; ' + r.cor + ' acertos</div>' +
+      '<div style="font-size:12px;color:var(--muted)">' + r.sent + '/' + TOTAL + ' enviados &middot; <span style="color:var(--green)">' + r.exact + ' exactos</span> &middot; <span style="color:var(--amber)">' + r.partial + ' ganador</span></div>' +
       '<div class="pw"><div class="pf" style="width:' + pct + '%"></div></div></div>' +
       '<div><div class="lrp">' + r.pts + '</div><div class="lrpl">PUNTOS</div></div></div>';
   }
