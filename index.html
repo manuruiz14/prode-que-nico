@@ -210,7 +210,77 @@ var BIN_ID = '6a264f8fda38895dfe97bfb2';
 var BIN_KEY = '$2a$10$XMM2AfUMF0KgEhQL3B.JC.jzyMC09BwdZAQ97VA43mhM4PzCx9/Q6';
 var BIN_URL = 'https://api.jsonbin.io/v3/b/' + BIN_ID;
 
-// Estado en memoria
+// ---- FOOTBALL-DATA CONFIG ----
+var FD_KEY = '597ab3c8b7374eedb2eac267ad5041d9';
+var FD_URL = 'https://api.football-data.org/v4/competitions/WC/matches';
+
+function fetchResults() {
+  return fetch(FD_URL + '?status=FINISHED', {
+    headers: { 'X-Auth-Token': FD_KEY }
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (!data.matches) return;
+    var updated = false;
+    data.matches.forEach(function(match) {
+      var score = match.score;
+      if (!score || !score.fullTime) return;
+      var h = score.fullTime.home;
+      var a = score.fullTime.away;
+      if (h === null || a === null) return;
+      // Buscar partido en nuestros datos por nombres de equipo
+      var homeTeam = match.homeTeam.name;
+      var awayTeam = match.awayTeam.name;
+      var found = findMatchId(homeTeam, awayTeam);
+      if (found !== null) {
+        var cur = DB.results[found];
+        if (!cur || cur.h !== h || cur.a !== a) {
+          DB.results[found] = { h: h, a: a };
+          updated = true;
+        }
+      }
+    });
+    if (updated) {
+      return saveDB().then(function() {
+        toast('Resultados actualizados automaticamente');
+      });
+    }
+  })
+  .catch(function(e) { console.log('Error cargando resultados:', e); });
+}
+
+// Mapeo de nombres de football-data.org a nuestros nombres
+var TEAM_MAP = {
+  'Mexico': 'Mexico', 'South Africa': 'Sudafrica', 'Korea Republic': 'Corea del Sur', 'Czech Republic': 'Rep. Checa',
+  'Canada': 'Canada', 'Bosnia and Herzegovina': 'Bosnia-Herzegovina', 'Qatar': 'Qatar', 'Switzerland': 'Suiza',
+  'Brazil': 'Brasil', 'Morocco': 'Marruecos', 'Haiti': 'Haiti', 'Scotland': 'Escocia',
+  'United States': 'USA', 'Paraguay': 'Paraguay', 'Australia': 'Australia', 'Türkiye': 'Turquia',
+  'Germany': 'Alemania', 'Curaçao': 'Curazao', "Côte d'Ivoire": 'C. de Marfil', 'Ecuador': 'Ecuador',
+  'Netherlands': 'Paises Bajos', 'Japan': 'Japon', 'Sweden': 'Suecia', 'Tunisia': 'Tunez',
+  'Belgium': 'Belgica', 'Egypt': 'Egipto', 'Iran': 'Iran', 'New Zealand': 'Nueva Zelanda',
+  'Spain': 'Espana', 'Cape Verde': 'Cabo Verde', 'Saudi Arabia': 'Arabia Saudita', 'Uruguay': 'Uruguay',
+  'France': 'Francia', 'Senegal': 'Senegal', 'Iraq': 'Iraq', 'Norway': 'Noruega',
+  'Argentina': 'Argentina', 'Algeria': 'Argelia', 'Austria': 'Austria', 'Jordan': 'Jordania',
+  'Portugal': 'Portugal', 'DR Congo': 'R. del Congo', 'Uzbekistan': 'Uzbekistan', 'Colombia': 'Colombia',
+  'England': 'Inglaterra', 'Croatia': 'Croacia', 'Ghana': 'Ghana', 'Panama': 'Panama'
+};
+
+function findMatchId(homeApi, awayApi) {
+  var h = TEAM_MAP[homeApi] || homeApi;
+  var a = TEAM_MAP[awayApi] || awayApi;
+  for (var i = 0; i < GM.length; i++) {
+    if (GM[i].h === h && GM[i].a === a) return GM[i].id;
+    if (GM[i].h === a && GM[i].a === h) return GM[i].id;
+  }
+  // Buscar en KO por nombres editados
+  for (var id in DB.koNames) {
+    // id es "matchId_side"
+  }
+  return null;
+}
+
+// ---- ESTADO EN MEMORIA ----
+
 var DB = { users: [], passwords: {}, predictions: {}, results: {}, koNames: {} };
 var CU = null, ADM = false;
 var gff = 'all', kof = '16avos', at = 'usuarios';
@@ -414,9 +484,21 @@ function loginAs(name) {
     setBtnLoading(true);
     loadDB().then(function() {
       setBtnLoading(false);
-      var pw = prompt('Contrasena de ' + name + ':');
+      // Si el usuario no tiene contraseña asignada, le pedimos que cree una
+      if (!DB.passwords[name]) {
+        var pw1 = prompt('Primera vez que entrás. Elegí una contraseña para ' + name + ':');
+        if (!pw1 || pw1.trim() === '') { toast('Debes elegir una contraseña', '#e85555'); return; }
+        var pw2 = prompt('Repetí la contraseña:');
+        if (pw1 !== pw2) { toast('Las contraseñas no coinciden', '#e85555'); return; }
+        DB.passwords[name] = pw1;
+        CU = name; ADM = false;
+        if (!DB.predictions[name]) DB.predictions[name] = {};
+        saveDB().then(function() { enterApp(); });
+        return;
+      }
+      var pw = prompt('Contraseña de ' + name + ':');
       if (pw === null) return;
-      if (pw !== DB.passwords[name]) { toast('Contrasena incorrecta', '#e85555'); return; }
+      if (pw !== DB.passwords[name]) { toast('Contraseña incorrecta', '#e85555'); return; }
       CU = name; ADM = false;
       if (!DB.predictions[name]) DB.predictions[name] = {};
       enterApp();
@@ -444,7 +526,7 @@ function enterApp() {
   document.getElementById('nav').style.display = 'flex';
   document.getElementById('nb-adm').style.display = ADM ? 'block' : 'none';
   document.querySelectorAll('.pg').forEach(function(p) { p.classList.remove('on'); });
-  if (ADM) go('admin', document.getElementById('nb-adm'));
+  if (ADM) { go('admin', document.getElementById('nb-adm')); startAutoSync(); fetchResults(); }
   else go('grupos', document.querySelector('.nb'));
 }
 
@@ -735,8 +817,33 @@ function renderUsuarios() {
   return html;
 }
 
+function syncResults() {
+  toast('Buscando resultados...', '#4a9eff');
+  fetchResults().then(function() {
+    var activo = document.querySelector('.pg.on');
+    if (activo && activo.id === 'pg-admin') renderAdmin();
+  });
+}
+
+// Auto-sync cada 5 minutos cuando el admin está logueado
+var syncInterval = null;
+function startAutoSync() {
+  if (syncInterval) clearInterval(syncInterval);
+  syncInterval = setInterval(function() {
+    if (ADM) fetchResults();
+  }, 5 * 60 * 1000);
+}
+
 function renderAdmin() {
   if (!ADM) { document.getElementById('ct-adm').innerHTML = '<div class="es"><h3>Acceso denegado</h3></div>'; return; }
+  // Mostrar boton de sync manual arriba
+  var syncBtn = document.getElementById('sync-btn');
+  if (!syncBtn) {
+    var banner = document.querySelector('.adm-banner');
+    if (banner) {
+      banner.innerHTML += ' <button onclick="syncResults()" style="background:var(--blue);color:#fff;border:none;padding:5px 12px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--fb);margin-left:10px" id="sync-btn">Sync resultados</button>';
+    }
+  }
   var N = { '16avos': '16avos de Final', octavos: 'Octavos de Final', cuartos: 'Cuartos de Final', semis: 'Semifinales', final: 'Final' };
   var html = '';
   if (at === 'usuarios') {
